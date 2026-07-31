@@ -30,3 +30,11 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
+
+# Build context trimmers (not needed for the image, only bloat context transfer)
+backup-data
+docs
+gitbook
+images
+cli
+skills

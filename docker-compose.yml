@@ -1,6 +1,10 @@
 services:
   9router:
-    image: decolua/9router:latest
+    # Build from this repo (no upstream image pull)
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: 9router-app:local
     container_name: 9router
     restart: always
     ports:
@@ -18,6 +22,8 @@ services:
     depends_on:
       - headroom
 
+  # Optional RTK token-saver sidecar (external image). Remove this service
+  # and the HEADROOM_URL env above if you don't use Headroom.
   headroom:
     image: ghcr.io/chopratejas/headroom:latest
     container_name: headroom
