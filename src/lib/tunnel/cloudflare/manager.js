@@ -1,7 +1,7 @@
 import { loadState, saveState, generateShortId } from "../shared/state.js";
 import { spawnQuickTunnel, killCloudflared, isCloudflaredRunning, setUnexpectedExitHandler } from "./cloudflared.js";
 import { clearPid } from "./pid.js";
-import { waitForHealth, probeUrlAlive } from "./healthCheck.js";
+import { waitForHealthAny, probeUrlAlive } from "./healthCheck.js";
 import { WORKER_URL } from "./config.js";
 import { getSettings, updateSettings } from "@/lib/localDb";
 
@@ -87,14 +87,19 @@ export async function enableTunnel(localPort = 20128) {
     await updateSettings({ tunnelEnabled: true, tunnelUrl });
     console.log(`[Tunnel] registered shortId=${shortId} publicUrl=${publicUrl}`);
 
-    // Verify publicUrl first (worker route is reliable; direct *.trycloudflare.com DNS may lag)
-    await waitForHealth(publicUrl, token);
-    console.log("[Tunnel] public URL healthy");
-    // Direct tunnel probe is best-effort: DNS for *.trycloudflare.com can be slow/blocked
-    if (!(await probeUrlAlive(tunnelUrl))) {
-      console.warn("[Tunnel] direct URL not reachable yet, continuing via publicUrl");
-    } else {
-      console.log("[Tunnel] direct URL healthy");
+    // Verify reachability via publicUrl (worker route) OR direct URL — either is
+    // enough. Direct *.trycloudflare.com DNS can lag or be blocked locally while
+    // the worker route is already live, and vice versa.
+    // NON-FATAL: cloudflared can take >60s to register edge connections (firewall
+    // prompts, slow DNS). The client-side ping loop and the watchdog re-probe and
+    // surface any real outage; failing enable here only reports a working tunnel
+    // as broken.
+    try {
+      await waitForHealthAny([publicUrl, tunnelUrl], token);
+      console.log("[Tunnel] tunnel URL healthy");
+    } catch (e) {
+      if (token.cancelled || /cancelled/.test(e.message)) throw e;
+      console.warn(`[Tunnel] health check incomplete: ${e.message} — continuing`);
     }
 
     console.log("[Tunnel] enable success");

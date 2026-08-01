@@ -9,7 +9,7 @@ import {
   getTunnelService, getTailscaleService, setTunnelUnexpectedExitCallback,
   killCloudflared, isCloudflaredRunning, ensureCloudflared,
   isTailscaleRunning, isTailscaleRunningStrict, isDaemonAlive, startFunnel,
-  checkInternet,
+  checkInternet, loadState, probeCloudflareAlive,
   RESTART_COOLDOWN_MS, NETWORK_SETTLE_MS,
   WATCHDOG_INTERVAL_MS, NETWORK_CHECK_INTERVAL_MS, VIRTUAL_IFACE_REGEX,
 } from "@/lib/tunnel";
@@ -167,9 +167,15 @@ async function safeRestartTunnel(reason) {
 
   const force = FORCE_RESTART_REASONS.test(reason);
 
-  // Process alive = trust cloudflared (self-reconnects via --retries 99, keeps same URL).
-  // Killing a live process on network change drops the tunnel and rotates the quick-tunnel URL.
-  if (isCloudflaredRunning()) return;
+  // Process alive: trust cloudflared only while its URL is actually reachable.
+  // A wedged process (connection lost, stuck in retry loop, stale URL) must be
+  // replaced — otherwise the watchdog parks forever behind a dead-but-alive PID
+  // and the dashboard shows "checking" indefinitely.
+  if (isCloudflaredRunning()) {
+    const state = loadState();
+    if (!state?.tunnelUrl || await probeCloudflareAlive(state.tunnelUrl)) return;
+    console.log(`[Tunnel] process alive but URL unreachable (${state.tunnelUrl}), restarting (${reason})`);
+  }
 
   if (!force && Date.now() - svc.lastRestartAt < RESTART_COOLDOWN_MS) {
     console.log(`[Tunnel] degraded but cooldown active, skip (${reason})`);

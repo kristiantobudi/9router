@@ -19,10 +19,22 @@ export async function probeUrlAlive(url) {
 }
 
 export async function waitForHealth(url, cancelToken = { cancelled: false }) {
+  return waitForHealthAny([url], cancelToken);
+}
+
+/**
+ * Wait until ANY of the given URLs answers /api/health with OK.
+ * Used for tunnels where the public shortlink and the direct URL may
+ * become reachable at different times (worker route vs edge DNS).
+ */
+export async function waitForHealthAny(urls, cancelToken = { cancelled: false }) {
+  const list = (urls || []).filter(Boolean);
+  if (list.length === 0) throw new Error("No URLs to health-check");
   const start = Date.now();
   while (Date.now() - start < HEALTH_CHECK.timeoutMs) {
     if (cancelToken.cancelled) throw new Error("cancelled");
-    if (await probeUrlAlive(url)) return true;
+    const results = await Promise.all(list.map((u) => probeUrlAlive(u)));
+    if (results.some(Boolean)) return true;
     await new Promise((r) => setTimeout(r, HEALTH_CHECK.intervalMs));
   }
   throw new Error(`Health check timeout after ${HEALTH_CHECK.timeoutMs}ms`);
